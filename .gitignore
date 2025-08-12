@@ -1,0 +1,4 @@
+venv/
+.env
+o365_token.txt
+transaction_data.xlsx
