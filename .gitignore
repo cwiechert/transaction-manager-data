@@ -1,4 +1,5 @@
 venv/
-.env
-o365_token.txt
 transaction_data.xlsx
+.env
+old_data_notebooks/
+_pycache_/
