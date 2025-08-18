@@ -12,6 +12,7 @@ REASON_MAP = {
     'UBER RIDES UBER RIDES LAS CONDES CHL': 'Transporte',
     'LIME*PAGO ODVY +18885463345 US': 'Transporte',
     'LIME*3 VIAJES ODVY +18885463345 USA': 'Transporte',
+    'LIME*VIAJE K4UQ SAN FRANCISCO USA': 'Transporte',
 
     'PAYU *UBER EATS SANTIAGO CHL': 'Comida - Delivery',
 

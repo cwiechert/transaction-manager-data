@@ -1,9 +1,11 @@
 import os
 import re
-from datetime import timezone
+import json
 
 from dotenv import load_dotenv
-from O365 import Account
+import msal
+from bs4 import BeautifulSoup
+import requests
 import pandas as pd
 from sqlalchemy import create_engine
 
@@ -28,6 +30,7 @@ MS_TENANT_ID = 'consumers'
 AUTHORITY = f"https://login.microsoftonline.com/{MS_TENANT_ID}"
 SCOPES = ["Mail.Read"]
 GRAPH_API_ENDPOINT = "https://graph.microsoft.com/v1.0/me/messages"
+SENDER_EMAIL = 'enviodigital@bancochile.cl'
 
 # Regex for parsing email
 MONEY_RX = re.compile(r'(US)?\$([0-9,.]+)')
@@ -72,12 +75,13 @@ def get_access_token(client_id: str, authority: str, scopes: list) -> str:
         return None
 
 
-def get_emails(access_token: str, num_emails: int = 10) -> dict:
+def get_emails(access_token: str, num_emails: int = 50) -> dict:
     """
     Fetches emails from the Microsoft Graph API.
     
     Args:
         access_token (str): The access token to authenticate the request.
+        num_emails (int): The number of emails to fetch.
         
     Returns:
         A dictionary containing the JSON response from the API, or None on failure.
@@ -91,8 +95,6 @@ def get_emails(access_token: str, num_emails: int = 10) -> dict:
         'Content-Type': 'application/json'
     }
     
-    # Define query parameters to get the top 10 emails, ordered by received date
-    # and selecting only specific fields to be more efficient.
     query_params = {
         '$top': num_emails,
         '$orderby': 'receivedDateTime DESC'
@@ -117,14 +119,17 @@ def get_emails(access_token: str, num_emails: int = 10) -> dict:
 
 
 def email_to_dataframe(raw_emails: dict) -> pd.DataFrame:
-    # Regex for parsing email
-    MONEY_RX = re.compile(r'(US)?\$([0-9,.]+)')
-    TIMESTAMP_RX = re.compile(r'(\d{2}/\d{2}/\d{4}\s\d{2}:\d{2})')
-    REASON_RX = re.compile(r'\*{4}\d{4} en (.*?) el \d{2}/\d{2}/\d{4}')
-    sender_email = 'enviodigital@bancochile.cl'
+    """
+    Converts raw email data to a DataFrame.
+    
+    Args:
+        raw_emails (dict): The raw email data from the Microsoft Graph API.
+    Returns:
+        pd.DataFrame: A DataFrame containing parsed email data.
+    """
     data = []
     for message in raw_emails:
-        if message['sender']['emailAddress']['address'] == sender_email:
+        if message['sender']['emailAddress']['address'] == SENDER_EMAIL:
             try:
                 raw_body = message['body']['content']
                 soup = BeautifulSoup(raw_body, 'html.parser')
@@ -138,7 +143,7 @@ def email_to_dataframe(raw_emails: dict) -> pd.DataFrame:
                         TIMESTAMP_RX.findall(content)[0], 
                         format='%d/%m/%Y %H:%M'
                         ),
-                    'sender': sender_email,
+                    'sender': SENDER_EMAIL,
                     'currency': 'USD' if raw_money[0] == 'US' else 'CLP',
                     'amount': float(raw_money[1].replace('.', '').replace(',', '.')),
                     'reason': REASON_RX.findall(content)[0],
@@ -162,7 +167,7 @@ def categorize_transactions(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         pd.DataFrame: The DataFrame with an added 'category' column.
     """
-    df['category'] = df['reason'].apply(
+    df.loc[:, 'category'] = df['reason'].apply(
         lambda x: REASON_MAP.get(x, DEFAULT_CATEGORY)
     )
     return df
@@ -202,11 +207,12 @@ def main():
     Main function to connect, fetch, categorize, and upload transactions.
     """
     try:
-        access_token = get_access_token()
+        access_token = get_access_token(MS_CLIENT_ID, AUTHORITY, SCOPES)
     except Exception as e:
         raise ConnectionError(f"MS account connection failed: {e}")
 
-    transactions_df = get_emails(access_token, num_emails=100)
+    raw_transactions = get_emails(access_token, num_emails=100)
+    transactions_df = email_to_dataframe(raw_transactions) 
     if transactions_df.empty:
         print('No transaction emails found to process')
         return
