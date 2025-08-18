@@ -9,7 +9,7 @@ import requests
 import pandas as pd
 from sqlalchemy import create_engine
 
-from config import REASON_MAP
+from extract_and_upload_data.config import REASON_MAP
 
 load_dotenv()
 
