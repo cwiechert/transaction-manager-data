@@ -1,38 +1,24 @@
-import os
 import re
 import json
+import logging
 
 from dotenv import load_dotenv
 import msal
 from bs4 import BeautifulSoup
 import requests
 import pandas as pd
-from sqlalchemy import create_engine
 
-from extract_and_upload_data.config import REASON_MAP
+from extract_and_upload_data.config import REASON_MAP, DB_ENGINE
+from extract_and_upload_data.config import MS_CLIENT_ID, AUTHORITY, SCOPES
+from extract_and_upload_data.config import GRAPH_API_ENDPOINT, SENDER_EMAIL
 
 load_dotenv()
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
-# Credentials
-SUPABASE_USER = os.getenv("SUPABASE_USER")
-SUPABASE_PASSWORD = os.getenv("SUPABASE_PASSWORD")
-SUPABASE_HOST = os.getenv("SUPABASE_HOST")
-SUPABASE_PORT = os.getenv("SUPABASE_PORT")
-SUPABASE_DBNAME = os.getenv("SUPABASE_DBNAME")
-DB_URL = (
-    f"postgresql://{SUPABASE_USER}:{SUPABASE_PASSWORD}@"
-    f"{SUPABASE_HOST}:{SUPABASE_PORT}/{SUPABASE_DBNAME}"
-    )
-DB_ENGINE = create_engine(DB_URL)
-
-MS_CLIENT_ID = os.getenv('MS_CLIENT_ID')
-MS_TENANT_ID = 'consumers'
-AUTHORITY = f"https://login.microsoftonline.com/{MS_TENANT_ID}"
-SCOPES = ["Mail.Read"]
-GRAPH_API_ENDPOINT = "https://graph.microsoft.com/v1.0/me/messages"
-SENDER_EMAIL = 'enviodigital@bancochile.cl'
-
-# Regex for parsing email
+# Regex for email parsing
 MONEY_RX = re.compile(r'(US)?\$([0-9,.]+)')
 TIMESTAMP_RX = re.compile(r'(\d{2}/\d{2}/\d{4}\s\d{2}:\d{2})')
 REASON_RX = re.compile(r'\*{4}\d{4} en (.*?) el \d{2}/\d{2}/\d{4}')
@@ -56,11 +42,11 @@ def get_access_token(client_id: str, authority: str, scopes: list) -> str:
     accounts = app.get_accounts()
     result = None
     if accounts:
-        print("Account found in cache. Attempting to acquire token silently...")
+        logging.info("Account found in cache. Attempting to acquire token silently...")
         result = app.acquire_token_silent(scopes, account=accounts[0])
 
     if not result:
-        print("No suitable token in cache. Initiating interactive login.")
+        logging.info("No suitable token in cache. Initiating interactive login.")
         result = app.acquire_token_interactive(
             scopes=scopes,
             prompt="select_account"
@@ -69,9 +55,8 @@ def get_access_token(client_id: str, authority: str, scopes: list) -> str:
     if "access_token" in result:
         return result["access_token"]
     else:
-        print("Could not acquire access token.")
-        print(result.get("error"))
-        print(result.get("error_description"))
+        logging.error("Could not acquire access token.")
+        logging.error(result.get("error"))
         return None
 
 
@@ -87,7 +72,7 @@ def get_emails(access_token: str, num_emails: int = 50) -> dict:
         A dictionary containing the JSON response from the API, or None on failure.
     """
     if not access_token:
-        print("Cannot get emails without an access token.")
+        logging.info("Cannot get emails without an access token.")
         return None
         
     headers = {
@@ -106,19 +91,18 @@ def get_emails(access_token: str, num_emails: int = 50) -> dict:
             headers=headers,
             params=query_params
         )
-        # Raise an exception for bad status codes (4xx or 5xx)
         response.raise_for_status()
         return response.json()['value']
         
     except requests.exceptions.RequestException as e:
-        print(f"An error occurred while making the request: {e}")
+        logging.info(f"An error occurred while making the request: {e}")
         return None
     except json.JSONDecodeError:
-        print("Failed to decode JSON from response.")
+        logging.info("Failed to decode JSON from response.")
         return None
 
 
-def email_to_dataframe(raw_emails: dict) -> pd.DataFrame:
+def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
     """
     Converts raw email data to a DataFrame.
     
@@ -151,7 +135,7 @@ def email_to_dataframe(raw_emails: dict) -> pd.DataFrame:
                 }
                 data.append(row)
             except Exception as e:
-                print(f"Could not parse email {message['id']}: {e}")
+                logging.warning(f"Could not parse email {message['id']}: {e}")
                 continue
     df = pd.DataFrame(data)
     return df
@@ -187,7 +171,7 @@ def send_df_to_supabase(df: pd.DataFrame) -> bool:
         df.to_sql('transactions', DB_ENGINE, if_exists='append', index=False)
         return True
     except Exception as e:
-        print(f"Database upload failed: {e}")
+        logging.error(f"Database upload failed: {e}")
         return False
 
 
@@ -198,11 +182,11 @@ def fetch_supabase_data() -> pd.DataFrame:
     try:
         return pd.read_sql('SELECT "Id" FROM transactions', DB_ENGINE)
     except Exception as e:
-        print(f'Error trying to get data from Supabase: {e}')
+        logging.error(f'Error trying to get data from Supabase: {e}')
         return pd.DataFrame()
     
 
-def main():
+def update_data() -> bool:
     """
     Main function to connect, fetch, categorize, and upload transactions.
     """
@@ -214,7 +198,7 @@ def main():
     raw_transactions = get_emails(access_token, num_emails=100)
     transactions_df = email_to_dataframe(raw_transactions) 
     if transactions_df.empty:
-        print('No transaction emails found to process')
+        logging.info('No transaction emails found to process')
         return
 
     previous_dataframe = fetch_supabase_data()
@@ -222,17 +206,15 @@ def main():
     filtered_transactions = transactions_df.loc[is_new]
 
     if filtered_transactions.empty:
-        print("No new transactions found.")
+        logging.info("No new transactions found.")
         return
 
-    print(f"Found {len(filtered_transactions)} new transactions to upload.")
+    logging.info(f"Found {len(filtered_transactions)} new transactions to upload.")
     categorized_df = categorize_transactions(filtered_transactions)
 
     if send_df_to_supabase(categorized_df):
-        print('Success! Data sent to Supabase.')
+        logging.info('Success! Data sent to Supabase.')
     else:
-        print('Error sending data to Supabase.')
-
-
-if __name__ == '__main__':
-    main()
+        logging.info('Error sending data to Supabase.')
+    
+    return True
