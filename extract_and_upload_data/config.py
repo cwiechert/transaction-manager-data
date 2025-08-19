@@ -20,7 +20,7 @@ MS_TENANT_ID = 'consumers'
 AUTHORITY = f"https://login.microsoftonline.com/{MS_TENANT_ID}"
 SCOPES = ["Mail.Read"]
 GRAPH_API_ENDPOINT = "https://graph.microsoft.com/v1.0/me/messages"
-SENDER_EMAIL = 'enviodigital@bancochile.cl'
+SENDER_EMAIL = ['enviodigital@bancochile.cl', 'serviciodetransferencias@bancochile.cl']
 
 
 REASON_MAP = {

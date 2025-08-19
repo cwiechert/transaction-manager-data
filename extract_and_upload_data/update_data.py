@@ -7,6 +7,7 @@ import msal
 from bs4 import BeautifulSoup
 import requests
 import pandas as pd
+from sqlalchemy.dialects.postgresql import JSONB
 
 from extract_and_upload_data.config import REASON_MAP, DB_ENGINE
 from extract_and_upload_data.config import MS_CLIENT_ID, AUTHORITY, SCOPES
@@ -19,9 +20,13 @@ logging.basicConfig(
 )
 
 # Regex for email parsing
-MONEY_RX = re.compile(r'(US)?\$([0-9,.]+)')
-TIMESTAMP_RX = re.compile(r'(\d{2}/\d{2}/\d{4}\s\d{2}:\d{2})')
-REASON_RX = re.compile(r'\*{4}\d{4} en (.*?) el \d{2}/\d{2}/\d{4}')
+MONEY = re.compile(r'(US)?\$([0-9,.]+)')
+TC_PAYMENT_MONEY = re.compile(r'(Monto) \$([0-9,.]+)')
+TC_TIMESTAMP = re.compile(r'(\d{2}/\d{2}/\d{4}\s\d{2}:\d{2})')
+TC_REASON = re.compile(r'\*{4}\d{4} en (.*?) el \d{2}/\d{2}/\d{4}')
+CC_PAYMENT_SOURCE = re.compile(r'(\d.*?) Destino')
+CC_PAYMENT_DESTINATION = re.compile(r'Destino Nombre y Apellido (.*?) Rut (\d+\-\d)')
+CC_TIMESTAMP = re.compile(r'Fecha y Hora:\d+\s()')
 
 # Transactions Map
 DEFAULT_CATEGORY = None
@@ -113,30 +118,66 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
     """
     data = []
     for message in raw_emails:
-        if message['sender']['emailAddress']['address'] == SENDER_EMAIL:
+        sender = message['sender']['emailAddress']['address']
+        if sender in SENDER_EMAIL:
             try:
                 raw_body = message['body']['content']
                 soup = BeautifulSoup(raw_body, 'html.parser')
                 content = soup.find('body').text
-                raw_money = MONEY_RX.findall(content)[0]
+                raw_money = MONEY.findall(content)[0]
 
+                if sender == 'enviodigital@bancochile.cl':
+                    transaction_type = 'Pago con TC'
+                    transaction_time_local = pd.to_datetime(
+                        TC_TIMESTAMP.findall(content)[0], 
+                        format='%d/%m/%Y %H:%M'
+                        )
+                    payment_reason = TC_REASON.findall(content)[0]
+                    transferation_type = None
+                    transferation_source = None
+                    transferation_destination = None
+
+                elif sender == 'serviciodetransferencias@bancochile.cl':
+                    transaction_type = 'Transferencia'
+                    transaction_time_local = pd.to_datetime(
+                        message['sentDateTime'], utc=True
+                        ).tz_convert('America/Santiago').tz_localize(None)
+                    payment_reason = None
+                    transferation_type = message['subject']
+                    raw_money = TC_PAYMENT_MONEY.findall(content)[0] if transferation_type in ('Pago de Tarjeta de Crédito Internacional', 'Pago de Tarjeta de Crédito Nacional') else raw_money
+                    transferation_source = CC_PAYMENT_SOURCE.findall(content)[0]
+                    raw_destination = CC_PAYMENT_DESTINATION.findall(content)
+                    if not raw_destination:
+                        transferation_destination = None
+                    else:
+                        transferation_destination = {
+                            'nombre': CC_PAYMENT_DESTINATION.findall(content)[0][0],
+                            'rut': CC_PAYMENT_DESTINATION.findall(content)[0][1],
+                        }
+                        
+                else:
+                    raise ValueError(f"Unexpected sender: {sender}")
+                
                 row = {
                     'Id': message['id'],
                     'mail_timestamp_utc': pd.to_datetime(message['receivedDateTime']),
-                    'transaction_timestamp_local': pd.to_datetime(
-                        TIMESTAMP_RX.findall(content)[0], 
-                        format='%d/%m/%Y %H:%M'
-                        ),
-                    'sender': SENDER_EMAIL,
+                    'transaction_timestamp_local': transaction_time_local,
+                    'sender': sender,
                     'currency': 'USD' if raw_money[0] == 'US' else 'CLP',
                     'amount': float(raw_money[1].replace('.', '').replace(',', '.')),
-                    'reason': REASON_RX.findall(content)[0],
+                    'transaction_type': transaction_type,
+                    'transferation_type': transferation_type,
+                    'transferation_source': transferation_source,
+                    'transferation_destination': transferation_destination,
+                    'payment_reason': payment_reason,
                     'content': content,
                 }
                 data.append(row)
             except Exception as e:
                 logging.warning(f"Could not parse email {message['id']}: {e}")
+                print(raw_money)
                 continue
+        
     df = pd.DataFrame(data)
     return df
 
@@ -151,10 +192,20 @@ def categorize_transactions(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         pd.DataFrame: The DataFrame with an added 'category' column.
     """
-    df.loc[:, 'category'] = df['reason'].apply(
+    temp_df = df.copy()
+    temp_df.loc[:, 'category'] = temp_df['payment_reason'].apply(
         lambda x: REASON_MAP.get(x, DEFAULT_CATEGORY)
     )
-    return df
+    credit_card_payments = [
+        'Pago de Tarjeta de Crédito Internacional',
+        'Pago de Tarjeta de Crédito Nacional'
+        ]
+
+    temp_df.loc[
+        temp_df['transferation_type'].isin(credit_card_payments), 
+        'category'
+        ] = 'Pago de Tarjeta de Crédito'
+    return temp_df
 
 
 def send_df_to_supabase(df: pd.DataFrame) -> bool:
@@ -168,7 +219,7 @@ def send_df_to_supabase(df: pd.DataFrame) -> bool:
         bool: True if successful, False otherwise.
     """
     try:
-        df.to_sql('transactions', DB_ENGINE, if_exists='append', index=False)
+        df.to_sql('transactions', DB_ENGINE, if_exists='append', index=False, dtype={'transferation_destination': JSONB})
         return True
     except Exception as e:
         logging.error(f"Database upload failed: {e}")
@@ -186,7 +237,7 @@ def fetch_supabase_data() -> pd.DataFrame:
         return pd.DataFrame()
     
 
-def update_data() -> bool:
+def update_data(num_emails) -> bool:
     """
     Main function to connect, fetch, categorize, and upload transactions.
     """
@@ -195,7 +246,7 @@ def update_data() -> bool:
     except Exception as e:
         raise ConnectionError(f"MS account connection failed: {e}")
 
-    raw_transactions = get_emails(access_token, num_emails=100)
+    raw_transactions = get_emails(access_token, num_emails=num_emails)
     transactions_df = email_to_dataframe(raw_transactions) 
     if transactions_df.empty:
         logging.info('No transaction emails found to process')
