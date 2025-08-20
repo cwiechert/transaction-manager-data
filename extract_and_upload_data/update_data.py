@@ -53,7 +53,6 @@ def get_access_token(client_id: str, authority: str, scopes: list, username: str
     cache = msal.SerializableTokenCache()
 
     if os.path.exists(cache_file):
-        print(cache_file)
         with open(cache_file, "r") as f:
             cache.deserialize(f.read())
 
