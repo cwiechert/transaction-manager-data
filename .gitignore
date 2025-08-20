@@ -4,3 +4,5 @@ transaction_data.xlsx
 deprecado/
 __pycache__/
 msal_cache.bin
+server-instructions.txt
+server-key.pem
