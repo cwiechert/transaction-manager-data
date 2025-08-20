@@ -16,7 +16,7 @@ DB_URL = (
     )
 DB_ENGINE = create_engine(DB_URL)
 MS_CLIENT_ID = os.getenv('MS_CLIENT_ID')
-MS_TENANT_ID = 'consumers'
+MS_TENANT_ID = os.getenv('MS_TENANT_ID')
 AUTHORITY = f"https://login.microsoftonline.com/{MS_TENANT_ID}"
 SCOPES = ["Mail.Read"]
 GRAPH_API_ENDPOINT = "https://graph.microsoft.com/v1.0/me/messages"
