@@ -3,3 +3,4 @@ transaction_data.xlsx
 .env
 deprecado/
 __pycache__/
+msal_cache.bin

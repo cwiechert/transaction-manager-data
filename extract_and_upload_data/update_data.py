@@ -1,6 +1,8 @@
 import re
 import json
 import logging
+import os
+import atexit
 
 from dotenv import load_dotenv
 import msal
@@ -9,7 +11,7 @@ import requests
 import pandas as pd
 from sqlalchemy.dialects.postgresql import JSONB
 
-from extract_and_upload_data.config import REASON_MAP, DB_ENGINE
+from extract_and_upload_data.config import DB_ENGINE
 from extract_and_upload_data.config import MS_CLIENT_ID, AUTHORITY, SCOPES
 from extract_and_upload_data.config import GRAPH_API_ENDPOINT, SENDER_EMAIL
 
@@ -39,9 +41,18 @@ def get_access_token(client_id: str, authority: str, scopes: list) -> str:
     It first tries to get a token from the cache. If that fails, it will
     open a web browser for the user to sign in and grant consent.
     """
+    cache_file = 'msal_cache.bin'
+    cache = msal.SerializableTokenCache()
+    if os.path.exists(cache_file):
+        cache.deserialize(open(cache_file, 'r').read())
+    atexit.register(lambda:
+        open(cache_file, "w").write(cache.serialize()) if cache.has_state_changed else None
+    )
+
     app = msal.PublicClientApplication(
         client_id,
-        authority=authority
+        authority=authority,
+        token_cache=cache
     )
 
     accounts = app.get_accounts()
@@ -150,10 +161,7 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
                     if not raw_destination:
                         transferation_destination = None
                     else:
-                        transferation_destination = {
-                            'nombre': CC_PAYMENT_DESTINATION.findall(content)[0][0],
-                            'rut': CC_PAYMENT_DESTINATION.findall(content)[0][1],
-                        }
+                        transferation_destination = CC_PAYMENT_DESTINATION.findall(content)[0][0]
                         
                 else:
                     raise ValueError(f"Unexpected sender: {sender}")
@@ -171,6 +179,7 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
                     'transferation_destination': transferation_destination,
                     'payment_reason': payment_reason,
                     'content': content,
+                    'user_email': message['toRecipients'][0]['emailAddress']['address'] 
                 }
                 data.append(row)
             except Exception as e:
@@ -180,32 +189,6 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
         
     df = pd.DataFrame(data)
     return df
-
-
-def categorize_transactions(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Adds a 'category' column to the DataFrame based on the 'reason' column.
-
-    Args:
-        df (pd.DataFrame): The input DataFrame with a 'reason' column.
-
-    Returns:
-        pd.DataFrame: The DataFrame with an added 'category' column.
-    """
-    temp_df = df.copy()
-    temp_df.loc[:, 'category'] = temp_df['payment_reason'].apply(
-        lambda x: REASON_MAP.get(x, DEFAULT_CATEGORY)
-    )
-    credit_card_payments = [
-        'Pago de Tarjeta de Crédito Internacional',
-        'Pago de Tarjeta de Crédito Nacional'
-        ]
-
-    temp_df.loc[
-        temp_df['transferation_type'].isin(credit_card_payments), 
-        'category'
-        ] = 'Pago de Tarjeta de Crédito'
-    return temp_df
 
 
 def send_df_to_supabase(df: pd.DataFrame) -> bool:
@@ -219,7 +202,7 @@ def send_df_to_supabase(df: pd.DataFrame) -> bool:
         bool: True if successful, False otherwise.
     """
     try:
-        df.to_sql('transactions', DB_ENGINE, if_exists='append', index=False, dtype={'transferation_destination': JSONB})
+        df.to_sql('transactions', DB_ENGINE, if_exists='append', index=False)
         return True
     except Exception as e:
         logging.error(f"Database upload failed: {e}")
@@ -261,9 +244,8 @@ def update_data(num_emails) -> bool:
         return
 
     logging.info(f"Found {len(filtered_transactions)} new transactions to upload.")
-    categorized_df = categorize_transactions(filtered_transactions)
 
-    if send_df_to_supabase(categorized_df):
+    if send_df_to_supabase(filtered_transactions):
         logging.info('Success! Data sent to Supabase.')
     else:
         logging.info('Error sending data to Supabase.')
