@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import atexit
+from pathlib import Path
 
 from dotenv import load_dotenv
 import msal
@@ -37,17 +38,23 @@ DEFAULT_CATEGORY = None
 def get_access_token(client_id: str, authority: str, scopes: list) -> str:
     """
     Acquires an access token from Microsoft identity platform.
-    
-    It first tries to get a token from the cache. If that fails, it will
-    open a web browser for the user to sign in and grant consent.
+    Uses a persistent file cache to avoid repeated logins.
+    Supports multiple Outlook accounts.
     """
-    cache_file = 'msal_cache.bin'
+
+    cache_file = Path.home() / ".msal_cache.bin"
     cache = msal.SerializableTokenCache()
-    if os.path.exists(cache_file):
-        cache.deserialize(open(cache_file, 'r').read())
-    atexit.register(lambda:
-        open(cache_file, "w").write(cache.serialize()) if cache.has_state_changed else None
-    )
+
+    if cache_file.exists():
+        with open(cache_file, "r") as f:
+            cache.deserialize(f.read())
+
+    def save_cache():
+        if cache.has_state_changed:
+            with open(cache_file, "w") as f:
+                f.write(cache.serialize())
+
+    atexit.register(save_cache)
 
     app = msal.PublicClientApplication(
         client_id,
@@ -57,9 +64,21 @@ def get_access_token(client_id: str, authority: str, scopes: list) -> str:
 
     accounts = app.get_accounts()
     result = None
+    chosen_account = None
+
     if accounts:
         logging.info("Account found in cache. Attempting to acquire token silently...")
-        result = app.acquire_token_silent(scopes, account=accounts[0])
+        for i, acc in enumerate(accounts):
+            print(f"{i}: {acc['username']}")
+
+        try:
+            choice = int(input("Choose account number (or -1 for new login): "))
+            if 0 <= choice < len(accounts):
+                chosen_account = accounts[choice]
+                logging.info(f"Using cached account: {chosen_account['username']}")
+                result = app.acquire_token_silent(scopes, account=chosen_account)
+        except (ValueError, IndexError):
+            logging.warning("Invalid choice. Proceeding to interactive login.")
 
     if not result:
         logging.info("No suitable token in cache. Initiating interactive login.")
@@ -68,12 +87,12 @@ def get_access_token(client_id: str, authority: str, scopes: list) -> str:
             prompt="select_account"
         )
 
-    if "access_token" in result:
+    if result and "access_token" in result:
+        logging.info("Access token acquired successfully.")
         return result["access_token"]
-    else:
-        logging.error("Could not acquire access token.")
-        logging.error(result.get("error"))
-        return None
+
+    logging.error(f"Token acquisition failed: {result.get('error')} - {result.get('error_description')}")
+    return None
 
 
 def get_emails(access_token: str, num_emails: int = 50) -> dict:
