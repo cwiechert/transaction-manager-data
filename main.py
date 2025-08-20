@@ -1,3 +1,4 @@
 from extract_and_upload_data.update_data import update_data
 
-update_data(num_emails=50)
+if __name__ == "__main__":
+    update_data(num_emails=50)
