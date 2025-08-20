@@ -1,0 +1,41 @@
+name: Refresh Transaction Data
+
+on:
+  repository_dispatch:
+    types: [refresh-data]
+  workflow_dispatch:
+
+jobs:
+  refresh-data:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        repository: cwiechert/transaction-manager-data
+        token: ${{ secrets.TOKEN_GITHUB }}
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+      
+    - name: Run data update script
+      env:
+        # Add your environment variables here
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+        # Add other required environment variables
+      run: |
+        python main.py
+    
+    - name: Notify completion
+      run: |
+        echo "Transaction data refresh completed at $(date)"
