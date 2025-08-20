@@ -3,7 +3,6 @@ import json
 import logging
 import os
 import atexit
-from pathlib import Path
 
 from dotenv import load_dotenv
 import msal
@@ -35,17 +34,26 @@ CC_TIMESTAMP = re.compile(r'Fecha y Hora:\d+\s()')
 DEFAULT_CATEGORY = None
 
 
-def get_access_token(client_id: str, authority: str, scopes: list) -> str:
+def get_access_token(client_id: str, authority: str, scopes: list, username: str) -> str:
     """
     Acquires an access token from Microsoft identity platform.
     Uses a persistent file cache to avoid repeated logins.
-    Supports multiple Outlook accounts.
-    """
+    If `username` is cached, uses it silently.
+    Otherwise, triggers interactive login.
 
-    cache_file = Path.home() / ".msal_cache.bin"
+    Args:
+        client_id (str): The client ID of the Azure AD application.
+        authority (str): The authority URL for the Microsoft identity platform.
+        scopes (list): The scopes for which the token is requested.
+        username (str): User mail inbox that we're getting.
+    Returns:
+        str: The access token if successful, None otherwise.
+    """
+    cache_file = "msal_cache.bin"
     cache = msal.SerializableTokenCache()
 
-    if cache_file.exists():
+    if os.path.exists(cache_file):
+        print(cache_file)
         with open(cache_file, "r") as f:
             cache.deserialize(f.read())
 
@@ -62,33 +70,23 @@ def get_access_token(client_id: str, authority: str, scopes: list) -> str:
         token_cache=cache
     )
 
-    accounts = app.get_accounts()
+    accounts = app.get_accounts(username=username)
     result = None
-    chosen_account = None
 
     if accounts:
-        logging.info("Account found in cache. Attempting to acquire token silently...")
-        for i, acc in enumerate(accounts):
-            print(f"{i}: {acc['username']}")
-
-        try:
-            choice = int(input("Choose account number (or -1 for new login): "))
-            if 0 <= choice < len(accounts):
-                chosen_account = accounts[choice]
-                logging.info(f"Using cached account: {chosen_account['username']}")
-                result = app.acquire_token_silent(scopes, account=chosen_account)
-        except (ValueError, IndexError):
-            logging.warning("Invalid choice. Proceeding to interactive login.")
+        logging.info(f"Found cached account for {username}. Attempting silent token acquisition.")
+        result = app.acquire_token_silent(scopes, account=accounts[0])
 
     if not result:
-        logging.info("No suitable token in cache. Initiating interactive login.")
+        logging.info(f"No cached token for {username}. Initiating interactive login.")
         result = app.acquire_token_interactive(
             scopes=scopes,
+            login_hint=username,
             prompt="select_account"
         )
 
     if result and "access_token" in result:
-        logging.info("Access token acquired successfully.")
+        logging.info(f"Access token acquired for {username}.")
         return result["access_token"]
 
     logging.error(f"Token acquisition failed: {result.get('error')} - {result.get('error_description')}")
@@ -239,17 +237,22 @@ def fetch_supabase_data() -> pd.DataFrame:
         return pd.DataFrame()
     
 
-def update_data(num_emails) -> bool:
+def update_data(user_email: str, num_emails: int) -> bool:
     """
     Main function to connect, fetch, categorize, and upload transactions.
     """
     try:
-        access_token = get_access_token(MS_CLIENT_ID, AUTHORITY, SCOPES)
+        access_token = get_access_token(
+            client_id=MS_CLIENT_ID, 
+            authority=AUTHORITY, 
+            scopes=SCOPES,
+            username=user_email
+            )
     except Exception as e:
         raise ConnectionError(f"MS account connection failed: {e}")
 
-    raw_transactions = get_emails(access_token, num_emails=num_emails)
-    transactions_df = email_to_dataframe(raw_transactions) 
+    raw_transactions = get_emails(access_token=access_token, num_emails=num_emails)
+    transactions_df = email_to_dataframe(raw_emails=raw_transactions) 
     if transactions_df.empty:
         logging.info('No transaction emails found to process')
         return
@@ -264,7 +267,7 @@ def update_data(num_emails) -> bool:
 
     logging.info(f"Found {len(filtered_transactions)} new transactions to upload.")
 
-    if send_df_to_supabase(filtered_transactions):
+    if send_df_to_supabase(df=filtered_transactions):
         logging.info('Success! Data sent to Supabase.')
     else:
         logging.info('Error sending data to Supabase.')
