@@ -282,6 +282,7 @@ def outlook_update(user_email: str, num_emails: int) -> bool:
     transactions_df = email_to_dataframe(raw_emails=raw_transactions) 
     if transactions_df.empty:
         logging.info('No transaction emails found to process')
+        logging.info(f"Finished processing User: {user_email}\n")
         return
 
     previous_dataframe = fetch_supabase_data(user_email=user_email)
@@ -290,13 +291,17 @@ def outlook_update(user_email: str, num_emails: int) -> bool:
 
     if filtered_transactions.empty:
         logging.info("No new transactions found.")
+        logging.info(f"Finished processing User: {user_email}\n")
         return
 
     logging.info(f"Found {len(filtered_transactions)} new transactions to upload.")
 
     if send_df_to_supabase(df=filtered_transactions):
         logging.info('Success! Data sent to Supabase.')
+        logging.info(f"Finished processing User: {user_email}\n")
+        return True
     else:
         logging.info('Error sending data to Supabase.')
+        logging.info(f"Finished processing User: {user_email}\n")
+        return False
     
-    return True

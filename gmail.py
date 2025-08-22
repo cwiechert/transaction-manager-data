@@ -444,13 +444,12 @@ def gmail_update(user_email: str, num_emails: int) -> bool:
         return False
     
     raw_transactions = get_emails(credentials=cred, num_emails=num_emails)
-    if not raw_transactions:
-        return True # Success, but nothing to do.
 
     transactions_df = email_to_dataframe(raw_emails=raw_transactions)
     if transactions_df.empty:
         logging.info('No relevant transaction emails found to process.')
-        return True
+        logging.info(f"Finished processing User: {user_email}\n")
+        return
 
     previous_dataframe = fetch_supabase_data(user_email=user_email)
     is_new = ~transactions_df['Id'].isin(previous_dataframe['Id'])
@@ -458,13 +457,16 @@ def gmail_update(user_email: str, num_emails: int) -> bool:
 
     if filtered_transactions.empty:
         logging.info("No new transactions found after filtering against the database.")
-        return True
+        logging.info(f"Finished processing User: {user_email}\n")
+        return
 
     logging.info(f"Found {len(filtered_transactions)} new transactions to upload.")
 
     if send_df_to_supabase(df=filtered_transactions):
         logging.info('Success! Data pipeline completed and new data was uploaded.')
+        logging.info(f"Finished processing User: {user_email}\n")
         return True
     else:
         logging.error('Error! The data pipeline failed during the upload step.')
+        logging.info(f"Finished processing User: {user_email}\n")
         return False
