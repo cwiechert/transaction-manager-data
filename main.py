@@ -1,11 +1,10 @@
 from outlook import outlook_update
 from gmail import gmail_update
-
-outlook_users = ['c-wiechert@hotmail.com']
-google_users = ['tlarrain3@gmail.com']
+from config import get_db_mails
 
 if __name__ == "__main__":
-    for g in google_users:
-        gmail_update(user_email=g, num_emails=20)
-    for o in outlook_users:
-        outlook_update(user_email=o, num_emails=20)
+    db_mails = get_db_mails()
+    for mail in db_mails['outlook']:
+        outlook_update(user_email=mail, num_emails=20)
+    for mail in db_mails['gmail']:
+        gmail_update(user_email=mail, num_emails=20)

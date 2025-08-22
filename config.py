@@ -1,4 +1,5 @@
 import os
+import pandas as pd
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
@@ -21,9 +22,6 @@ DB_ENGINE = create_engine(DB_URL)
 MS_CLIENT_ID = os.getenv('MS_CLIENT_ID')
 MS_TENANT_ID = os.getenv('MS_TENANT_ID')
 
-# Google API
-
-
 # Banco de Chile
 SENDER_EMAIL = ['enviodigital@bancochile.cl', 'serviciodetransferencias@bancochile.cl']
 TC_SUBJECTS = [ 
@@ -31,3 +29,13 @@ TC_SUBJECTS = [
     'Compra con Tarjeta de Crédito',  
     'Cargo en Cuenta'
     ]
+
+# Get DB Mails
+def get_db_mails():
+    df = pd.read_sql('SELECT email FROM auth.users', DB_ENGINE)
+    emails_list = df.email.to_list()
+    emails_dict = {
+        'outlook': [mail for mail in emails_list if mail.split('@')[1] in ('hotmail.com', 'outlook.com')],
+        'gmail': [mail for mail in emails_list if mail.split('@')[1] == 'gmail.com']
+        }
+    return emails_dict
