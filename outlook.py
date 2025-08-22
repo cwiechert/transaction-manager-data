@@ -9,11 +9,9 @@ import msal
 from bs4 import BeautifulSoup
 import requests
 import pandas as pd
-from sqlalchemy.dialects.postgresql import JSONB
 
-from extract_and_upload_data.config import DB_ENGINE
-from extract_and_upload_data.config import MS_CLIENT_ID, AUTHORITY, SCOPES
-from extract_and_upload_data.config import GRAPH_API_ENDPOINT, SENDER_EMAIL
+from config import DB_ENGINE, MS_CLIENT_ID, MS_TENANT_ID
+from config import SENDER_EMAIL, TC_SUBJECTS
 
 load_dotenv()
 logging.basicConfig(
@@ -26,12 +24,12 @@ MONEY = re.compile(r'(US)?\$([0-9,.]+)')
 TC_PAYMENT_MONEY = re.compile(r'(Monto) \$([0-9,.]+)')
 TC_TIMESTAMP = re.compile(r'(\d{2}/\d{2}/\d{4}\s\d{2}:\d{2})')
 TC_REASON = re.compile(r'\*{4}\d{4} en (.*?) el \d{2}/\d{2}/\d{4}')
-CC_PAYMENT_SOURCE = re.compile(r'(\d.*?) Destino')
 CC_PAYMENT_DESTINATION = re.compile(r'Destino Nombre y Apellido (.*?) Rut (\d+\-\d)')
-CC_TIMESTAMP = re.compile(r'Fecha y Hora:\d+\s()')
 
-# Transactions Map
-DEFAULT_CATEGORY = None
+# Variables
+SCOPES = ["Mail.Read"]
+AUTHORITY = f"https://login.microsoftonline.com/{MS_TENANT_ID}"
+GRAPH_API_ENDPOINT = "https://graph.microsoft.com/v1.0/me/messages"
 
 
 def get_access_token(client_id: str, authority: str, scopes: list, username: str) -> str:
@@ -151,33 +149,65 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
                 raw_body = message['body']['content']
                 soup = BeautifulSoup(raw_body, 'html.parser')
                 content = soup.find('body').text
-                raw_money = MONEY.findall(content)[0]
+                subject = message['subject']
+                transaction_type = None
+                payment_reason = None
+                transfer_type = None  
+                transfer_destination = None
+                
+                # Pago Tarjeta Credito
+                if subject in TC_SUBJECTS:
+                    raw_money = MONEY.findall(content)[0]
+                    currency = 'USD' if raw_money[0] == 'US' else 'CLP'
+                    amount = float(raw_money[1].replace('.', '').replace(',', '.'))
 
-                if sender == 'enviodigital@bancochile.cl':
-                    transaction_type = 'Pago con TC'
+                    transaction_type = subject
                     transaction_time_local = pd.to_datetime(
                         TC_TIMESTAMP.findall(content)[0], 
                         format='%d/%m/%Y %H:%M'
                         )
-                    payment_reason = TC_REASON.findall(content)[0]
+                    try:
+                        payment_reason = TC_REASON.findall(content)[0]
+                    except IndexError:
+                        payment_reason = subject
+
                     transferation_type = None
-                    transferation_source = None
                     transferation_destination = None
 
-                elif sender == 'serviciodetransferencias@bancochile.cl':
+                # Transferencias
+                elif ('transferencia' in subject.lower() 
+                        or 'Transferencias de Fondos a ' in subject.lower()):
+                    print(subject)
+                    raw_money = MONEY.findall(content)[0]
+                    currency = 'USD' if raw_money[0] == 'US' else 'CLP'
+                    amount = float(raw_money[1].replace('.', '').replace(',', '.'))
+
                     transaction_type = 'Transferencia'
                     transaction_time_local = pd.to_datetime(
                         message['sentDateTime'], utc=True
                         ).tz_convert('America/Santiago').tz_localize(None)
-                    payment_reason = None
-                    transferation_type = message['subject']
-                    raw_money = TC_PAYMENT_MONEY.findall(content)[0] if transferation_type in ('Pago de Tarjeta de Crédito Internacional', 'Pago de Tarjeta de Crédito Nacional') else raw_money
-                    transferation_source = CC_PAYMENT_SOURCE.findall(content)[0]
+                    transferation_type = 'Transferencia a Terceros'
+
+
                     raw_destination = CC_PAYMENT_DESTINATION.findall(content)
+
                     if not raw_destination:
                         transferation_destination = None
                     else:
-                        transferation_destination = CC_PAYMENT_DESTINATION.findall(content)[0][0]
+                        transferation_destination = raw_destination[0][0]
+                        print(transferation_destination)
+                    break
+                
+                elif subject in ['Pago de Tarjeta de Crédito Nacional', 'Pago de Tarjeta de Crédito Internacional']:
+                    raw_money = TC_PAYMENT_MONEY.findall(content)[0]
+                    currency = 'CLP'
+                    amount = raw_money[1]
+
+                    transaction_type = 'Pago de Tarjeta de Crédito'
+                    transaction_time_local = pd.to_datetime(
+                        message['sentDateTime'], utc=True
+                        ).tz_convert('America/Santiago').tz_localize(None)
+                    transferation_type = subject
                         
                 else:
                     raise ValueError(f"Unexpected sender: {sender}")
@@ -187,23 +217,23 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
                     'mail_timestamp_utc': pd.to_datetime(message['receivedDateTime']),
                     'transaction_timestamp_local': transaction_time_local,
                     'sender': sender,
-                    'currency': 'USD' if raw_money[0] == 'US' else 'CLP',
-                    'amount': float(raw_money[1].replace('.', '').replace(',', '.')),
+                    'currency': currency,
+                    'amount': amount,
                     'transaction_type': transaction_type,
                     'transferation_type': transferation_type,
-                    'transferation_source': transferation_source,
                     'transferation_destination': transferation_destination,
                     'payment_reason': payment_reason,
                     'content': content,
                     'user_email': message['toRecipients'][0]['emailAddress']['address'] 
                 }
                 data.append(row)
+                
             except Exception as e:
-                logging.warning(f"Could not parse email {message['id']}: {e}")
-                print(raw_money)
+                logging.warning(f"{subject}: {e}")
                 continue
         
     df = pd.DataFrame(data)
+
     return df
 
 
@@ -236,7 +266,7 @@ def fetch_supabase_data() -> pd.DataFrame:
         return pd.DataFrame()
     
 
-def update_data(user_email: str, num_emails: int) -> bool:
+def outlook_update(user_email: str, num_emails: int) -> bool:
     """
     Main function to connect, fetch, categorize, and upload transactions.
     """

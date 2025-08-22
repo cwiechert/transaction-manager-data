@@ -6,3 +6,6 @@ __pycache__/
 msal_cache.bin
 server-instructions.txt
 server-key.pem
+test.ipynb
+google_credentials.json
+google_tokens/
