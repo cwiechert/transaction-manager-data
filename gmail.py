@@ -385,10 +385,10 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
             'user_email': header_dict.get('To'),
         }
         rows.append(row)
-
+    
     df = pd.DataFrame(rows)
-    df['content'] = df['content'].str.replace(r'\s+', ' ', regex=True)
-
+    if not df.empty:
+        df['content'] = df['content'].str.replace(r'\s+', ' ', regex=True)
     return df
 
 
