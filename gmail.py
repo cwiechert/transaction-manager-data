@@ -410,12 +410,12 @@ def send_df_to_supabase(df: pd.DataFrame) -> bool:
         return False
 
 
-def fetch_supabase_data() -> pd.DataFrame:
+def fetch_supabase_data(user_email: str) -> pd.DataFrame:
     """
     Fetches existing transaction IDs from the Supabase table.
     """
     try:
-        return pd.read_sql('SELECT "Id" FROM transactions', DB_ENGINE)
+        return pd.read_sql(f"SELECT * FROM transactions WHERE user_email = '{user_email}'", DB_ENGINE)
     except Exception as e:
         return pd.DataFrame()
     
@@ -452,7 +452,7 @@ def gmail_update(user_email: str, num_emails: int) -> bool:
         logging.info('No relevant transaction emails found to process.')
         return True
 
-    previous_dataframe = fetch_supabase_data()
+    previous_dataframe = fetch_supabase_data(user_email=user_email)
     is_new = ~transactions_df['Id'].isin(previous_dataframe['Id'])
     filtered_transactions = transactions_df.loc[is_new]
 
