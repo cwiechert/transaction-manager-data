@@ -52,8 +52,7 @@ def get_credentials(email: str) -> Credentials:
         Exception: If the authentication flow fails.
     """
     email_name = email.split('@')[0]
-    os.makedirs(TOKEN_DIR, exist_ok=True)
-    token_file = os.path.join(TOKEN_DIR, f'{email_name}_google_token.json')
+    token_file = os.path.join(f'{email_name}_google_token.json')
     
     creds = None
     if os.path.exists(token_file):
@@ -338,7 +337,6 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
         # --- Case: Transferencias ---
         elif ('transferencia' in subject.lower() 
               and 'Transferencias de Fondos de' not in subject.lower()):
-            print(subject)
             raw_money = MONEY.findall(content)[0]
             currency = 'USD' if raw_money[0] == 'US' else 'CLP'
             raw_money = raw_money[1]
@@ -367,7 +365,7 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
             transfer_type = subject
 
         else:
-            logging.debug(f"Skipping unhandled subject: {subject}")
+            logging.debug(f"Skipping unhandled subject:\nSender:{sender}\nSubject{subject}")
             continue
 
         row = {
@@ -408,7 +406,7 @@ def send_df_to_supabase(df: pd.DataFrame) -> bool:
         df.to_sql('transactions', DB_ENGINE, if_exists='append', index=False)
         return True
     except Exception as e:
-        print(e)
+        logging.warning(e)
         return False
 
 
@@ -450,7 +448,6 @@ def gmail_update(user_email: str, num_emails: int) -> bool:
         return True # Success, but nothing to do.
 
     transactions_df = email_to_dataframe(raw_emails=raw_transactions)
-    print(transactions_df)
     if transactions_df.empty:
         logging.info('No relevant transaction emails found to process.')
         return True

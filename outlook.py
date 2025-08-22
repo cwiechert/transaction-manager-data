@@ -177,7 +177,6 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
                 # Transferencias
                 elif ('transferencia' in subject.lower() 
                         or 'Transferencias de Fondos a ' in subject.lower()):
-                    print(subject)
                     raw_money = MONEY.findall(content)[0]
                     currency = 'USD' if raw_money[0] == 'US' else 'CLP'
                     amount = float(raw_money[1].replace('.', '').replace(',', '.'))
@@ -195,7 +194,6 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
                         transferation_destination = None
                     else:
                         transferation_destination = raw_destination[0][0]
-                        print(transferation_destination)
                     break
                 
                 elif subject in ['Pago de Tarjeta de Crédito Nacional', 'Pago de Tarjeta de Crédito Internacional']:
@@ -210,7 +208,8 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
                     transferation_type = subject
                         
                 else:
-                    raise ValueError(f"Unexpected sender: {sender}")
+                    logging.debug(f"Skipping unhandled subject:\nSender:{sender}\nSubject{subject}")
+                    continue
                 
                 row = {
                     'Id': message['id'],
@@ -229,7 +228,7 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
                 data.append(row)
                 
             except Exception as e:
-                logging.warning(f"{subject}: {e}")
+                logging.warning(f"")
                 continue
         
     df = pd.DataFrame(data)

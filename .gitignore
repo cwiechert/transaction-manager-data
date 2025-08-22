@@ -9,3 +9,4 @@ server-key.pem
 test.ipynb
 google_credentials.json
 google_tokens/
+*_google_token.json

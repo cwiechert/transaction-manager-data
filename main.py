@@ -1,7 +1,13 @@
-from outlook import update_data as outlook_update
-from gmail import google_update_data
+from outlook import outlook_update
+from gmail import gmail_update
 
-users = ['c-wiechert@hotmail.com', 'tlarrain3@hotmail.com']
+outlook_users = ['c-wiechert@hotmail.com']
+google_users = ['tlarrain3@gmail.com']
 
 if __name__ == "__main__":
-    google_update_data(user_email='tlarrain3@hotmail.com', num_emails=2000)
+    for g in google_users:
+        gmail_update(user_email=g, num_emails=50)
+        print('---------------------------------')
+    for o in outlook_users:
+        outlook_update(user_email=o, num_emails=50)
+        print('---------------------------------')
