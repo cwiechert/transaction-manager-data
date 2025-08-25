@@ -23,7 +23,7 @@ MS_CLIENT_ID = os.getenv('MS_CLIENT_ID')
 MS_TENANT_ID = os.getenv('MS_TENANT_ID')
 
 # Banco de Chile
-SENDER_EMAIL = ['enviodigital@bancochile.cl', 'serviciodetransferencias@bancochile.cl']
+SENDER_EMAIL = ['enviodigital@bancochile.cl', 'serviciodetransferencias@bancochile.cl', 'enviodigital@bancoedwards.cl']
 TC_SUBJECTS = [ 
     'Giro con Tarjeta de Débito',  
     'Compra con Tarjeta de Crédito',  
