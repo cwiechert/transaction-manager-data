@@ -152,10 +152,10 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
                 subject = message['subject']
                 transaction_type = None
                 payment_reason = None
-                transfer_type = None  
-                transfer_destination = None
+                transferation_type = None  
+                transferation_destination = None
                 
-                # Pago Tarjeta Credito
+                # Pagos y Avances con Tarjeta Credito
                 if subject in TC_SUBJECTS:
                     raw_money = MONEY.findall(content)[0]
                     currency = 'USD' if raw_money[0] == 'US' else 'CLP'
@@ -170,9 +170,6 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
                         payment_reason = TC_REASON.findall(content)[0]
                     except IndexError:
                         payment_reason = subject
-
-                    transferation_type = None
-                    transferation_destination = None
 
                 # Transferencias
                 elif ('transferencia' in subject.lower() 
@@ -190,12 +187,11 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
 
                     raw_destination = CC_PAYMENT_DESTINATION.findall(content)
 
-                    if not raw_destination:
-                        transferation_destination = None
-                    else:
+                    if raw_destination:
                         transferation_destination = raw_destination[0][0]
                     break
                 
+                # Pago saldo Tarjeta de Credito
                 elif subject in ['Pago de Tarjeta de Crédito Nacional', 'Pago de Tarjeta de Crédito Internacional']:
                     raw_money = TC_PAYMENT_MONEY.findall(content)[0]
                     currency = 'CLP'

@@ -27,7 +27,8 @@ SENDER_EMAIL = ['enviodigital@bancochile.cl', 'serviciodetransferencias@bancochi
 TC_SUBJECTS = [ 
     'Giro con Tarjeta de Débito',  
     'Compra con Tarjeta de Crédito',  
-    'Cargo en Cuenta'
+    'Cargo en Cuenta',
+    'Avance con Tarjeta de Crédito'
     ]
 
 # Get DB Mails
