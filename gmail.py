@@ -382,7 +382,7 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
             'transferation_destination': transfer_destination,
             'payment_reason': payment_reason,
             'content': content.strip(),
-            'user_email': header_dict.get('To').replace('>', '').replace('<', ''),
+            'user_email': header_dict.get('Delivered-To'),
         }
         rows.append(row)
     
