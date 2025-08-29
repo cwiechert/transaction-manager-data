@@ -24,7 +24,7 @@ MONEY = re.compile(r'(US)?\$([0-9,.]+)')
 TC_PAYMENT_MONEY = re.compile(r'(Monto) \$([0-9,.]+)')
 TC_TIMESTAMP = re.compile(r'(\d{2}/\d{2}/\d{4}\s\d{2}:\d{2})')
 TC_REASON = re.compile(r'\*{4}\d{4} en (.*?) el \d{2}/\d{2}/\d{4}')
-CC_PAYMENT_DESTINATION = re.compile(r'Destino Nombre y Apellido (.*?) Rut (\d+\-\d)')
+CC_PAYMENT_DESTINATION = re.compile(r'Nombre( y Apellido)?(.*?)\s?Rut')
 
 # Variables
 SCOPES = ["Mail.Read"]
@@ -192,7 +192,7 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
                     raw_destination = CC_PAYMENT_DESTINATION.findall(content)
 
                     if raw_destination:
-                        transferation_destination = raw_destination[0][0]
+                        transferation_destination = raw_destination[0][1]
                 
                 # Pago saldo Tarjeta de Credito
                 elif subject in ['Pago de Tarjeta de Crédito Nacional', 'Pago de Tarjeta de Crédito Internacional']:
