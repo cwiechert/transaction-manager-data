@@ -143,7 +143,11 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
     """
     data = []
     for message in raw_emails:
-        sender = message['sender']['emailAddress']['address']
+        try:
+            sender = message['sender']['emailAddress']['address']
+        except KeyError:
+            logging.warning('Empty email detected, continueing with the next one...')
+            continue
         if sender in SENDER_EMAIL:
             try:
                 raw_body = message['body']['content']
@@ -189,7 +193,6 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
 
                     if raw_destination:
                         transferation_destination = raw_destination[0][0]
-                    break
                 
                 # Pago saldo Tarjeta de Credito
                 elif subject in ['Pago de Tarjeta de Crédito Nacional', 'Pago de Tarjeta de Crédito Internacional']:
