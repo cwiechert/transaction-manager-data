@@ -23,6 +23,7 @@ GRAPH_API_ENDPOINT = "https://graph.microsoft.com/v1.0/me/messages"
 MS_CLIENT_ID = os.getenv('MS_CLIENT_ID')
 MS_TENANT_ID = os.getenv('MS_TENANT_ID')
 AUTHORITY = f"https://login.microsoftonline.com/{MS_TENANT_ID}"
+TM_EMAIL = 'transaction_manager@outlook.com'
 
 # Banco de Chile
 SENDER_EMAIL = ['enviodigital@bancochile.cl', 'serviciodetransferencias@bancochile.cl', 'enviodigital@bancoedwards.cl']

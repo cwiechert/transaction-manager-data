@@ -11,7 +11,7 @@ import requests
 import pandas as pd
 
 from config import DB_ENGINE, MS_CLIENT_ID, AUTHORITY, SCOPES, GRAPH_API_ENDPOINT
-from config import SENDER_EMAIL, TC_SUBJECTS
+from config import SENDER_EMAIL, TC_SUBJECTS, TM_EMAIL
 
 load_dotenv()
 logging.basicConfig(
@@ -230,7 +230,7 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
         
     df = pd.DataFrame(data)
 
-    return df
+    return df, row['user_email']
 
 
 def send_df_to_supabase(df: pd.DataFrame) -> bool:
@@ -261,7 +261,7 @@ def fetch_supabase_data(user_email: str) -> pd.DataFrame:
         return pd.DataFrame()
     
 
-def outlook_update(user_email: str, num_emails: int) -> bool:
+def outlook_update(num_emails: int) -> bool:
     """
     Main function to connect, fetch, categorize, and upload transactions.
     """
@@ -270,16 +270,15 @@ def outlook_update(user_email: str, num_emails: int) -> bool:
             client_id=MS_CLIENT_ID, 
             authority=AUTHORITY, 
             scopes=SCOPES,
-            username=user_email
+            username=TM_EMAIL
             )
     except Exception as e:
         raise ConnectionError(f"MS account connection failed: {e}")
 
     raw_transactions = get_emails(access_token=access_token, num_emails=num_emails)
-    transactions_df = email_to_dataframe(raw_emails=raw_transactions) 
+    transactions_df, user_email = email_to_dataframe(raw_emails=raw_transactions) 
     if transactions_df.empty:
         logging.info('No transaction emails found to process')
-        logging.info(f"Finished processing User: {user_email}\n")
         return
 
     previous_dataframe = fetch_supabase_data(user_email=user_email)
@@ -288,17 +287,14 @@ def outlook_update(user_email: str, num_emails: int) -> bool:
 
     if filtered_transactions.empty:
         logging.info("No new transactions found.")
-        logging.info(f"Finished processing User: {user_email}\n")
         return
 
     logging.info(f"Found {len(filtered_transactions)} new transactions to upload.")
 
     if send_df_to_supabase(df=filtered_transactions):
         logging.info('Success! Data sent to Supabase.')
-        logging.info(f"Finished processing User: {user_email}\n")
         return True
     else:
         logging.info('Error sending data to Supabase.')
-        logging.info(f"Finished processing User: {user_email}\n")
         return False
     
