@@ -18,8 +18,11 @@ DB_URL = (
 DB_ENGINE = create_engine(DB_URL)
 
 # Microsoft API
+SCOPES = ["Mail.Read"]
+GRAPH_API_ENDPOINT = "https://graph.microsoft.com/v1.0/me/messages"
 MS_CLIENT_ID = os.getenv('MS_CLIENT_ID')
 MS_TENANT_ID = os.getenv('MS_TENANT_ID')
+AUTHORITY = f"https://login.microsoftonline.com/{MS_TENANT_ID}"
 
 # Banco de Chile
 SENDER_EMAIL = ['enviodigital@bancochile.cl', 'serviciodetransferencias@bancochile.cl', 'enviodigital@bancoedwards.cl']
@@ -27,5 +30,7 @@ TC_SUBJECTS = [
     'Giro con Tarjeta de Débito',  
     'Compra con Tarjeta de Crédito',  
     'Cargo en Cuenta',
-    'Avance con Tarjeta de Crédito'
+    'Avance con Tarjeta de Crédito',
+    'Cargo en Cuenta'
     ]
+

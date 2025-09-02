@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 import requests
 import pandas as pd
 
-from config import DB_ENGINE, MS_CLIENT_ID, MS_TENANT_ID
+from config import DB_ENGINE, MS_CLIENT_ID, AUTHORITY, SCOPES, GRAPH_API_ENDPOINT
 from config import SENDER_EMAIL, TC_SUBJECTS
 
 load_dotenv()
@@ -26,11 +26,6 @@ TC_PAYMENT_MONEY = re.compile(r'(Monto) \$([0-9,.]+)')
 TC_TIMESTAMP = re.compile(r'(\d{2}/\d{2}/\d{4}\s\d{2}:\d{2})')
 TC_REASON = re.compile(r'\*{4}\d{4} en (.*?) el \d{2}/\d{2}/\d{4}')
 CC_PAYMENT_DESTINATION = re.compile(r'Nombre( y Apellido)?(.*?)\s?Rut')
-
-# Variables
-SCOPES = ["Mail.Read"]
-AUTHORITY = f"https://login.microsoftonline.com/{MS_TENANT_ID}"
-GRAPH_API_ENDPOINT = "https://graph.microsoft.com/v1.0/me/messages"
 
 
 def get_access_token(client_id: str, authority: str, scopes: list, username: str) -> str:
