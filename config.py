@@ -30,13 +30,3 @@ TC_SUBJECTS = [
     'Cargo en Cuenta',
     'Avance con Tarjeta de Crédito'
     ]
-
-# Get DB Mails
-def get_db_mails():
-    df = pd.read_sql('SELECT email FROM auth.users', DB_ENGINE)
-    emails_list = df.email.to_list()
-    emails_dict = {
-        'outlook': [mail for mail in emails_list if mail.split('@')[1] in ('hotmail.com', 'outlook.com')],
-        'gmail': [mail for mail in emails_list if mail.split('@')[1] == 'gmail.com']
-        }
-    return emails_dict

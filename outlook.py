@@ -20,6 +20,7 @@ logging.basicConfig(
 )
 
 # Regex for email parsing
+SENDER_RX = re.compile(r'From:\s*([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)|\<(.*?)\>')
 MONEY = re.compile(r'(US)?\$([0-9,.]+)')
 TC_PAYMENT_MONEY = re.compile(r'(Monto) \$([0-9,.]+)')
 TC_TIMESTAMP = re.compile(r'(\d{2}/\d{2}/\d{4}\s\d{2}:\d{2})')
@@ -144,16 +145,18 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
     data = []
     for message in raw_emails:
         try:
-            sender = message['sender']['emailAddress']['address']
+            raw_body = message['body']['content']
+            soup = BeautifulSoup(raw_body, 'html.parser')
+            content = soup.find('body').text
+            raw_sender = SENDER_RX.findall(content)[0]
+            sender = raw_sender[1] if raw_sender[0] == '' else raw_sender[0]
+
         except KeyError:
             logging.warning('Empty email detected, continueing with the next one...')
             continue
         if sender in SENDER_EMAIL:
             try:
-                raw_body = message['body']['content']
-                soup = BeautifulSoup(raw_body, 'html.parser')
-                content = soup.find('body').text
-                subject = message['subject']
+                subject = message['subject'][4:] # Take out the "Fw " in front of the subject
                 transaction_type = None
                 payment_reason = None
                 transferation_type = None  
@@ -222,12 +225,12 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
                     'transferation_destination': transferation_destination,
                     'payment_reason': payment_reason,
                     'content': content,
-                    'user_email': message['toRecipients'][0]['emailAddress']['address'] 
+                    'user_email': message['from']['emailAddress']['address'] 
                 }
                 data.append(row)
                 
             except Exception as e:
-                logging.warning(f"")
+                logging.warning(f"message_id: {message['id']}\nError: {e}")
                 continue
         
     df = pd.DataFrame(data)
