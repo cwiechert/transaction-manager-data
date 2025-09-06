@@ -128,6 +128,44 @@ def get_emails(access_token: str, num_emails: int = 50) -> dict:
         return None
 
 
+def get_auth_users() -> pd.DataFrame:
+    """
+    Fetches existing authenticated user_emails from the Supabase table.
+    """
+    try:
+        return pd.read_sql(f"SELECT email FROM auth.users", DB_ENGINE)
+    except Exception as e:
+        return pd.DataFrame()
+
+
+def send_df_to_supabase(df: pd.DataFrame) -> bool:
+    """
+    Appends a DataFrame to the 'transactions' table in Supabase.
+
+    Args:
+        df (pd.DataFrame): The DataFrame to be uploaded.
+
+    Returns:
+        bool: True if successful, False otherwise.
+    """
+    try:
+        df.to_sql('transactions', DB_ENGINE, if_exists='append', index=False)
+        return True
+    except Exception as e:
+        logging.error(f"Database upload failed: {e}")
+        return False
+
+
+def fetch_supabase_data() -> pd.DataFrame:
+    """
+    Fetches existing transaction IDs from the Supabase table.
+    """
+    try:
+        return pd.read_sql(f'SELECT "Id" FROM transactions', DB_ENGINE)
+    except Exception as e:
+        return pd.DataFrame()
+    
+
 def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
     """
     Converts raw email data to a DataFrame.
@@ -138,7 +176,11 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
         pd.DataFrame: A DataFrame containing parsed email data.
     """
     data = []
+    auth_users = get_auth_users()['email'].to_list()
     for message in raw_emails:
+        forwarder = message['sender']['emailAddress']['address']
+        if forwarder not in auth_users:
+            continue
         try:
             raw_body = message['body']['content']
             soup = BeautifulSoup(raw_body, 'html.parser')
@@ -230,35 +272,7 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
         
     df = pd.DataFrame(data)
 
-    return df, row['user_email']
-
-
-def send_df_to_supabase(df: pd.DataFrame) -> bool:
-    """
-    Appends a DataFrame to the 'transactions' table in Supabase.
-
-    Args:
-        df (pd.DataFrame): The DataFrame to be uploaded.
-
-    Returns:
-        bool: True if successful, False otherwise.
-    """
-    try:
-        df.to_sql('transactions', DB_ENGINE, if_exists='append', index=False)
-        return True
-    except Exception as e:
-        logging.error(f"Database upload failed: {e}")
-        return False
-
-
-def fetch_supabase_data(user_email: str) -> pd.DataFrame:
-    """
-    Fetches existing transaction IDs from the Supabase table.
-    """
-    try:
-        return pd.read_sql(f"SELECT * FROM transactions WHERE user_email = '{user_email}'", DB_ENGINE)
-    except Exception as e:
-        return pd.DataFrame()
+    return df
     
 
 def outlook_update(num_emails: int) -> bool:
@@ -276,12 +290,12 @@ def outlook_update(num_emails: int) -> bool:
         raise ConnectionError(f"MS account connection failed: {e}")
 
     raw_transactions = get_emails(access_token=access_token, num_emails=num_emails)
-    transactions_df, user_email = email_to_dataframe(raw_emails=raw_transactions) 
+    transactions_df = email_to_dataframe(raw_emails=raw_transactions) 
     if transactions_df.empty:
         logging.info('No transaction emails found to process')
         return
 
-    previous_dataframe = fetch_supabase_data(user_email=user_email)
+    previous_dataframe = fetch_supabase_data()
     is_new = ~transactions_df['Id'].isin(previous_dataframe['Id'])
     filtered_transactions = transactions_df.loc[is_new]
 
