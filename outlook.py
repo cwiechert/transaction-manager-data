@@ -180,7 +180,8 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
     for message in raw_emails:
         forwarder = message['sender']['emailAddress']['address']
         if forwarder not in auth_users:
-            continue
+            continue # Skip emails not forwarded by authenticated users
+
         try:
             raw_body = message['body']['content']
             soup = BeautifulSoup(raw_body, 'html.parser')
@@ -191,9 +192,10 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
         except KeyError:
             logging.warning('Empty email detected, continueing with the next one...')
             continue
+
         if sender in SENDER_EMAIL:
             try:
-                subject = message['subject'][4:] # Take out the "Fw " in front of the subject
+                subject = message['subject'][4:] # Take out the "Fw: " and "FW: " in front of the subject
                 transaction_type = None
                 payment_reason = None
                 transferation_type = None  
@@ -216,8 +218,7 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
                         payment_reason = subject
 
                 # Transferencias
-                elif ('transferencia' in subject.lower() 
-                        or 'Transferencias de Fondos a ' in subject.lower()):
+                elif ('transferencia' in subject.lower()):
                     raw_money = MONEY.findall(content)[0]
                     currency = 'USD' if raw_money[0] == 'US' else 'CLP'
                     amount = float(raw_money[1].replace('.', '').replace(',', '.'))
@@ -227,8 +228,7 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
                         message['sentDateTime'], utc=True
                         ).tz_convert('America/Santiago').tz_localize(None)
                     transferation_type = 'Transferencia a Terceros'
-
-
+                    
                     raw_destination = CC_PAYMENT_DESTINATION.findall(content)
 
                     if raw_destination:
