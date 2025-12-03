@@ -11,7 +11,7 @@ import requests
 import pandas as pd
 
 from config import DB_ENGINE, MS_CLIENT_ID, AUTHORITY, SCOPES, GRAPH_API_ENDPOINT
-from config import SENDER_EMAIL, TC_SUBJECTS, TM_EMAIL
+from config import SENDER_EMAIL, SENDER_EMAIL, PAYMENT_SUBJECTS, TM_EMAIL
 
 load_dotenv()
 logging.basicConfig(
@@ -21,7 +21,7 @@ logging.basicConfig(
 
 # Regex for email parsing
 SENDER_RX = re.compile(r'From:\s*([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)|\<(.*?)\>')
-MONEY = re.compile(r'(US)?\$([0-9,.]+)')
+MONEY = re.compile(r'(US)?\$\s?([0-9,.]+)')
 TC_PAYMENT_MONEY = re.compile(r'(Monto) \$([0-9,.]+)')
 TC_TIMESTAMP = re.compile(r'(\d{2}/\d{2}/\d{4}\s\d{2}:\d{2})')
 TC_REASON = re.compile(r'\*{4}\d{4} en (.*?) el \d{2}/\d{2}/\d{4}')
@@ -164,23 +164,24 @@ def fetch_supabase_data() -> pd.DataFrame:
         return pd.read_sql(f'SELECT "Id" FROM transactions', DB_ENGINE)
     except Exception as e:
         return pd.DataFrame()
-    
+
 
 def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
     """
     Converts raw email data to a DataFrame.
     
     Args:
-        raw_emails (dict): The raw email data from the Microsoft Graph API.
+        raw_emails (list): The raw email data from the Microsoft Graph API.
     Returns:
         pd.DataFrame: A DataFrame containing parsed email data.
     """
     data = []
     auth_users = get_auth_users()['email'].to_list()
+    
     for message in raw_emails:
         forwarder = message['sender']['emailAddress']['address']
         if forwarder not in auth_users:
-            continue # Skip emails not forwarded by authenticated users
+            continue  # Skip emails not forwarded by authenticated users
 
         try:
             raw_body = message['body']['content']
@@ -188,91 +189,217 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
             content = soup.find('body').text
             raw_sender = SENDER_RX.findall(content)[0]
             sender = raw_sender[1] if raw_sender[0] == '' else raw_sender[0]
+            subject = message['subject'][4:].strip()  # Remove "Fw: " or "FW: "
 
         except KeyError:
-            logging.warning('Empty email detected, continueing with the next one...')
+            logging.warning('Empty email detected, continuing with the next one...')
             continue
 
         if sender in SENDER_EMAIL:
             try:
-                subject = message['subject'][4:] # Take out the "Fw: " and "FW: " in front of the subject
-                transaction_type = None
-                payment_reason = None
-                transferation_type = None  
-                transferation_destination = None
-                
-                # Pagos y Avances con Tarjeta Credito
-                if subject in TC_SUBJECTS:
-                    raw_money = MONEY.findall(content)[0]
-                    currency = 'USD' if raw_money[0] == 'US' else 'CLP'
-                    amount = float(raw_money[1].replace('.', '').replace(',', '.'))
+                row = None
+                credit_card_transactions_subjects = ['Giro con Tarjeta de Débito',  'Compra con Tarjeta de Crédito',  'Cargo en Cuenta','Avance con Tarjeta de Crédito','Cargo en Cuenta']
 
-                    transaction_type = subject
-                    transaction_time_local = pd.to_datetime(
-                        TC_TIMESTAMP.findall(content)[0], 
-                        format='%d/%m/%Y %H:%M'
-                        )
-                    try:
-                        payment_reason = TC_REASON.findall(content)[0]
-                    except IndexError:
-                        payment_reason = subject
+                if subject in credit_card_transactions_subjects:
+                    row = _process_credit_card_transaction(message, content, subject, sender)
 
-                # Transferencias
-                elif ('transferencia' in subject.lower()):
-                    raw_money = MONEY.findall(content)[0]
-                    currency = 'USD' if raw_money[0] == 'US' else 'CLP'
-                    amount = float(raw_money[1].replace('.', '').replace(',', '.'))
-
-                    transaction_type = 'Transferencia'
-                    transaction_time_local = pd.to_datetime(
-                        message['sentDateTime'], utc=True
-                        ).tz_convert('America/Santiago').tz_localize(None)
-                    transferation_type = 'Transferencia a Terceros'
+                elif subject in PAYMENT_SUBJECTS:
+                    row = _process_external_bank_payment(message, content, sender)
                     
-                    raw_destination = CC_PAYMENT_DESTINATION.findall(content)
+                elif 'transferencia' in subject.lower():
+                    row = _process_transfer(message, content, sender)
 
-                    if raw_destination:
-                        transferation_destination = raw_destination[0][1]
-                
-                # Pago saldo Tarjeta de Credito
                 elif subject in ['Pago de Tarjeta de Crédito Nacional', 'Pago de Tarjeta de Crédito Internacional']:
-                    raw_money = TC_PAYMENT_MONEY.findall(content)[0]
-                    currency = 'CLP'
-                    amount = raw_money[1]
+                    row = _process_credit_card_payment(message, content, subject, sender)
 
-                    transaction_type = 'Pago de Tarjeta de Crédito'
-                    transaction_time_local = pd.to_datetime(
-                        message['sentDateTime'], utc=True
-                        ).tz_convert('America/Santiago').tz_localize(None)
-                    transferation_type = subject
-                        
                 else:
-                    logging.debug(f"Skipping unhandled subject:\nSender:{sender}\nSubject{subject}")
+                    logging.debug(f"Skipping unhandled subject:\nSender: {sender}\nSubject: {subject}")
                     continue
                 
-                row = {
-                    'Id': message['id'],
-                    'mail_timestamp_utc': pd.to_datetime(message['receivedDateTime']),
-                    'transaction_timestamp_local': transaction_time_local,
-                    'sender': sender,
-                    'currency': currency,
-                    'amount': amount,
-                    'transaction_type': transaction_type,
-                    'transferation_type': transferation_type,
-                    'transferation_destination': transferation_destination,
-                    'payment_reason': payment_reason,
-                    'content': content,
-                    'user_email': message['from']['emailAddress']['address'] 
-                }
-                data.append(row)
+                if row:
+                    data.append(row)
                 
             except Exception as e:
                 logging.warning(f"message_id: {message['id']}\nError: {e}")
                 continue
-        
-    df = pd.DataFrame(data)
 
+    df = pd.DataFrame(data)
     return df
+
+
+def _process_external_bank_payment(message: dict, content: str, sender: str) -> dict:
+    """
+    Process External Banks Payments.
+    
+    Args:
+        message (dict): The email message data
+        content (str): Parsed email body content
+        sender (str): Email sender
+    
+    Returns:
+        dict: Transaction row data
+    """
+    raw_money = MONEY.findall(content)[0]
+    currency = 'USD' if raw_money[0] == 'US' else 'CLP'
+    amount = float(raw_money[1].replace('.', '').replace(',', '.'))
+    
+    transaction_time_local = pd.to_datetime(
+        message['sentDateTime'], utc=True
+    ).tz_convert('America/Santiago').tz_localize(None)
+    
+    if sender == 'notificaciones@cl.bancofalabella.com':
+        emitter_rx = re.compile(r'cliente (.*?) ha instruído')
+        
+    elif sender == 'transferencias@itau.cl':
+        emitter_rx = re.compile(r'cliente (.*?) ,')
+
+    elif sender == 'transferencias@bci.cl':
+        emitter_rx = re.compile(r'transferencia de fondos de (.*?) hacia')
+    
+    elif sender == 'mensajeria@santander.cl':
+        emitter_rx = re.compile(r'nuestro cliente (.*?) realizó')
+    
+    elif sender == 'reply@info.bice.cl':
+        emitter_rx = re.compile(r'Nombre(.*?)Banco')
+
+    else:
+        raise ValueError(f'Sender not recognized for emitter extraction: {sender}')
+
+    emitter = emitter_rx.findall(content)[0].strip()
+
+    return {
+        'Id': message['id'],
+        'mail_timestamp_utc': pd.to_datetime(message['receivedDateTime']),
+        'transaction_timestamp_local': transaction_time_local,
+        'sender': sender,
+        'currency': currency,
+        'amount': amount,
+        'transaction_type': 'Abono Cuenta',
+        'transferation_type': 'Transferencia de Terceros',
+        'transferation_destination': emitter.title(),
+        'payment_reason': None,
+        'content': content,
+        'user_email': message['from']['emailAddress']['address']
+    }
+
+
+def _process_credit_card_transaction(message: dict, content: str, subject: str, sender: str) -> dict:
+    """
+    Process credit card payments and advances (Pagos y Avances con Tarjeta Credito).
+    
+    Args:
+        message (dict): The email message data
+        content (str): Parsed email body content
+        subject (str): Email subject
+        sender (str): Email sender
+    
+    Returns:
+        dict: Transaction row data
+    """
+    raw_money = MONEY.findall(content)[0]
+    currency = 'USD' if raw_money[0] == 'US' else 'CLP'
+    amount = float(raw_money[1].replace('.', '').replace(',', '.'))
+    
+    transaction_time_local = pd.to_datetime(
+        TC_TIMESTAMP.findall(content)[0], 
+        format='%d/%m/%Y %H:%M'
+    )
+    
+    try:
+        payment_reason = TC_REASON.findall(content)[0]
+    except IndexError:
+        payment_reason = subject
+    
+    return {
+        'Id': message['id'],
+        'mail_timestamp_utc': pd.to_datetime(message['receivedDateTime']),
+        'transaction_timestamp_local': transaction_time_local,
+        'sender': sender,
+        'currency': currency,
+        'amount': amount,
+        'transaction_type': subject,
+        'transferation_type': None,
+        'transferation_destination': None,
+        'payment_reason': payment_reason,
+        'content': content,
+        'user_email': message['from']['emailAddress']['address']
+    }
+
+
+def _process_transfer(message: dict, content: str, sender: str) -> dict:
+    """
+    Process bank transfers (Transferencias).
+    
+    Args:
+        message (dict): The email message data
+        content (str): Parsed email body content
+        sender (str): Email sender
+    
+    Returns:
+        dict: Transaction row data
+    """
+    raw_money = MONEY.findall(content)[0]
+    currency = 'USD' if raw_money[0] == 'US' else 'CLP'
+    amount = float(raw_money[1].replace('.', '').replace(',', '.'))
+    
+    transaction_time_local = pd.to_datetime(
+        message['sentDateTime'], utc=True
+    ).tz_convert('America/Santiago').tz_localize(None)
+    
+    raw_destination = CC_PAYMENT_DESTINATION.findall(content)
+    transferation_destination = raw_destination[0][1] if raw_destination else None
+    
+    return {
+        'Id': message['id'],
+        'mail_timestamp_utc': pd.to_datetime(message['receivedDateTime']),
+        'transaction_timestamp_local': transaction_time_local,
+        'sender': sender,
+        'currency': currency,
+        'amount': amount,
+        'transaction_type': 'Transferencia',
+        'transferation_type': 'Transferencia a Terceros',
+        'transferation_destination': transferation_destination,
+        'payment_reason': None,
+        'content': content,
+        'user_email': message['from']['emailAddress']['address']
+    }
+
+
+def _process_credit_card_payment(message: dict, content: str, subject: str, sender: str) -> dict:
+    """
+    Process credit card balance payments (Pago saldo Tarjeta de Credito).
+    
+    Args:
+        message (dict): The email message data
+        content (str): Parsed email body content
+        subject (str): Email subject
+        sender (str): Email sender
+    
+    Returns:
+        dict: Transaction row data
+    """
+    raw_money = TC_PAYMENT_MONEY.findall(content)[0]
+    currency = 'CLP'
+    amount = float(raw_money[1].replace('.', '').replace(',', '.'))
+    
+    transaction_time_local = pd.to_datetime(
+        message['sentDateTime'], utc=True
+    ).tz_convert('America/Santiago').tz_localize(None)
+    
+    return {
+        'Id': message['id'],
+        'mail_timestamp_utc': pd.to_datetime(message['receivedDateTime']),
+        'transaction_timestamp_local': transaction_time_local,
+        'sender': sender,
+        'currency': currency,
+        'amount': amount,
+        'transaction_type': 'Pago de Tarjeta de Crédito',
+        'transferation_type': subject,
+        'transferation_destination': None,
+        'payment_reason': None,
+        'content': content,
+        'user_email': message['from']['emailAddress']['address']
+    }
     
 
 def outlook_update(num_emails: int) -> bool:

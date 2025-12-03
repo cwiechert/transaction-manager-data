@@ -26,12 +26,24 @@ AUTHORITY = f"https://login.microsoftonline.com/{MS_TENANT_ID}"
 TM_EMAIL = 'transaction_manager@outlook.com'
 
 # Banco de Chile
-SENDER_EMAIL = ['enviodigital@bancochile.cl', 'serviciodetransferencias@bancochile.cl', 'enviodigital@bancoedwards.cl']
-TC_SUBJECTS = [ 
-    'Giro con Tarjeta de Débito',  
-    'Compra con Tarjeta de Crédito',  
-    'Cargo en Cuenta',
-    'Avance con Tarjeta de Crédito',
-    'Cargo en Cuenta'
+SENDER_EMAIL = [
+    # Cargos
+    'enviodigital@bancochile.cl', 
+    'serviciodetransferencias@bancochile.cl',
+    'enviodigital@bancoedwards.cl',
+
+    # Abonos
+    'reply@info.bice.cl',
+    'mensajeria@santander.cl',
+    'transferencias@bci.cl',
+    'transferencias@itau.cl',
+    'notificaciones@cl.bancofalabella.com'
     ]
 
+PAYMENT_SUBJECTS = [
+    'Aviso de transferencia de fondos recibida',
+    'Itaú informa.',
+    'Aviso de Transferencia de Fondos.',
+    'Comprobante Transferencia de fondos',
+    'Recibiste una transferencia'
+]
