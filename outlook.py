@@ -190,8 +190,6 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
             content = soup.find('body').text
             sender = message['sender']['emailAddress']['address']
             subject = message['subject']
-            print(sender)
-            print(subject)
 
         except KeyError:
             logging.warning('Empty email detected, continuing with the next one...')
