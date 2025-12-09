@@ -11,7 +11,7 @@ import requests
 import pandas as pd
 
 from config import DB_ENGINE, MS_CLIENT_ID, AUTHORITY, SCOPES, GRAPH_API_ENDPOINT
-from config import SENDER_EMAIL, SENDER_EMAIL, PAYMENT_SUBJECTS, TM_EMAIL
+from config import SENDER_EMAIL, SENDER_EMAIL, PAYMENT_SUBJECTS, CC_SUBJECTS, TM_EMAIL
 
 load_dotenv()
 logging.basicConfig(
@@ -20,7 +20,6 @@ logging.basicConfig(
 )
 
 # Regex for email parsing
-SENDER_RX = re.compile(r'From:\s*([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)|\<(.*?)\>')
 MONEY = re.compile(r'(US)?\$\s?([0-9,.]+)')
 TC_PAYMENT_MONEY = re.compile(r'(Monto) \$([0-9,.]+)')
 TC_TIMESTAMP = re.compile(r'(\d{2}/\d{2}/\d{4}\s\d{2}:\d{2})')
@@ -179,7 +178,9 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
     auth_users = get_auth_users()['email'].to_list()
     
     for message in raw_emails:
-        forwarder = message['sender']['emailAddress']['address']
+        forwarder = message['toRecipients'][0]['emailAddress']['address']
+        if forwarder == 'cristobalw@gmail.com':
+            forwarder = 'c-wiechert@hotmail.com'
         if forwarder not in auth_users:
             continue  # Skip emails not forwarded by authenticated users
 
@@ -187,9 +188,10 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
             raw_body = message['body']['content']
             soup = BeautifulSoup(raw_body, 'html.parser')
             content = soup.find('body').text
-            raw_sender = SENDER_RX.findall(content)[0]
-            sender = raw_sender[1] if raw_sender[0] == '' else raw_sender[0]
-            subject = message['subject'][4:].strip()  # Remove "Fw: " or "FW: "
+            sender = message['sender']['emailAddress']['address']
+            subject = message['subject']
+            print(sender)
+            print(subject)
 
         except KeyError:
             logging.warning('Empty email detected, continuing with the next one...')
@@ -198,19 +200,18 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
         if sender in SENDER_EMAIL:
             try:
                 row = None
-                credit_card_transactions_subjects = ['Giro con Tarjeta de Débito',  'Compra con Tarjeta de Crédito',  'Cargo en Cuenta','Avance con Tarjeta de Crédito','Cargo en Cuenta']
 
-                if subject in credit_card_transactions_subjects:
-                    row = _process_credit_card_transaction(message, content, subject, sender)
+                if subject in CC_SUBJECTS:
+                    row = _process_credit_card_transaction(message, content, subject, sender, forwarder)
 
                 elif subject in PAYMENT_SUBJECTS:
-                    row = _process_external_bank_payment(message, content, sender)
+                    row = _process_external_bank_payment(message, content, sender, forwarder)
                     
                 elif 'transferencia' in subject.lower():
-                    row = _process_transfer(message, content, sender)
+                    row = _process_transfer(message, content, sender, forwarder)
 
                 elif subject in ['Pago de Tarjeta de Crédito Nacional', 'Pago de Tarjeta de Crédito Internacional']:
-                    row = _process_credit_card_payment(message, content, subject, sender)
+                    row = _process_credit_card_payment(message, content, subject, sender, forwarder)
 
                 else:
                     logging.debug(f"Skipping unhandled subject:\nSender: {sender}\nSubject: {subject}")
@@ -227,7 +228,7 @@ def email_to_dataframe(raw_emails: list) -> pd.DataFrame:
     return df
 
 
-def _process_external_bank_payment(message: dict, content: str, sender: str) -> dict:
+def _process_external_bank_payment(message: dict, content: str, sender: str, forwarder: str) -> dict:
     """
     Process External Banks Payments.
     
@@ -235,7 +236,8 @@ def _process_external_bank_payment(message: dict, content: str, sender: str) -> 
         message (dict): The email message data
         content (str): Parsed email body content
         sender (str): Email sender
-    
+        forwarder (str): Email forwarder user email
+
     Returns:
         dict: Transaction row data
     """
@@ -279,11 +281,11 @@ def _process_external_bank_payment(message: dict, content: str, sender: str) -> 
         'transferation_destination': emitter.title(),
         'payment_reason': None,
         'content': content,
-        'user_email': message['from']['emailAddress']['address']
+        'user_email': forwarder
     }
 
 
-def _process_credit_card_transaction(message: dict, content: str, subject: str, sender: str) -> dict:
+def _process_credit_card_transaction(message: dict, content: str, subject: str, sender: str, forwarder: str) -> dict:
     """
     Process credit card payments and advances (Pagos y Avances con Tarjeta Credito).
     
@@ -292,7 +294,8 @@ def _process_credit_card_transaction(message: dict, content: str, subject: str, 
         content (str): Parsed email body content
         subject (str): Email subject
         sender (str): Email sender
-    
+        forwarder (str): Email forwarder user email
+
     Returns:
         dict: Transaction row data
     """
@@ -322,11 +325,11 @@ def _process_credit_card_transaction(message: dict, content: str, subject: str, 
         'transferation_destination': None,
         'payment_reason': payment_reason,
         'content': content,
-        'user_email': message['from']['emailAddress']['address']
+        'user_email': forwarder
     }
 
 
-def _process_transfer(message: dict, content: str, sender: str) -> dict:
+def _process_transfer(message: dict, content: str, sender: str, forwarder: str) -> dict:
     """
     Process bank transfers (Transferencias).
     
@@ -334,7 +337,8 @@ def _process_transfer(message: dict, content: str, sender: str) -> dict:
         message (dict): The email message data
         content (str): Parsed email body content
         sender (str): Email sender
-    
+        forwarder (str): Email forwarder user email
+
     Returns:
         dict: Transaction row data
     """
@@ -361,11 +365,11 @@ def _process_transfer(message: dict, content: str, sender: str) -> dict:
         'transferation_destination': transferation_destination,
         'payment_reason': None,
         'content': content,
-        'user_email': message['from']['emailAddress']['address']
+        'user_email': forwarder
     }
 
 
-def _process_credit_card_payment(message: dict, content: str, subject: str, sender: str) -> dict:
+def _process_credit_card_payment(message: dict, content: str, subject: str, sender: str, forwarder: str) -> dict:
     """
     Process credit card balance payments (Pago saldo Tarjeta de Credito).
     
@@ -374,7 +378,8 @@ def _process_credit_card_payment(message: dict, content: str, subject: str, send
         content (str): Parsed email body content
         subject (str): Email subject
         sender (str): Email sender
-    
+        forwarder (str): Email forwarder user email
+
     Returns:
         dict: Transaction row data
     """
@@ -398,7 +403,7 @@ def _process_credit_card_payment(message: dict, content: str, subject: str, send
         'transferation_destination': None,
         'payment_reason': None,
         'content': content,
-        'user_email': message['from']['emailAddress']['address']
+        'user_email': forwarder
     }
     
 

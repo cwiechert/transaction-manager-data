@@ -47,3 +47,10 @@ PAYMENT_SUBJECTS = [
     'Comprobante Transferencia de fondos',
     'Recibiste una transferencia'
 ]
+
+CC_SUBJECTS = [
+    'Giro con Tarjeta de Débito',  
+    'Compra con Tarjeta de Crédito',  
+    'Cargo en Cuenta',
+    'Avance con Tarjeta de Crédito'
+    ]
